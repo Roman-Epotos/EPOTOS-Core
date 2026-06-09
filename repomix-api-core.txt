@@ -1,0 +1,448 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files, combined into a single document by Repomix.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: app/api/**/*.ts, app/lib/**/*.ts
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+
+
+================================================================
+Directory Structure
+================================================================
+app/api/assistant/chat/route.ts
+app/api/assistant/knowledge/route.ts
+app/api/assistant/search/route.ts
+app/api/assistant/upload/route.ts
+app/lib/supabase.ts
+
+================================================================
+Files
+================================================================
+
+================
+File: app/api/assistant/knowledge/route.ts
+================
+import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/app/lib/supabase'
+
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { headers: CORS_HEADERS })
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const module = request.nextUrl.searchParams.get('module') ?? 'юринтел'
+
+    const { data, error } = await supabase
+      .from('help_knowledge')
+      .select('id, title, source_file, module, created_at, uploaded_by_name')
+      .eq('module', module)
+      .order('created_at', { ascending: false })
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 400, headers: CORS_HEADERS })
+
+    return NextResponse.json({ documents: data ?? [] }, { headers: CORS_HEADERS })
+
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Неизвестная ошибка'
+    return NextResponse.json({ error: message }, { status: 500, headers: CORS_HEADERS })
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const id = request.nextUrl.searchParams.get('id')
+    if (!id) return NextResponse.json({ error: 'ID не указан' }, { status: 400, headers: CORS_HEADERS })
+
+    // Удаляем чанки (каскадно через FK) и сам документ
+    const { error } = await supabase
+      .from('help_knowledge')
+      .delete()
+      .eq('id', id)
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 400, headers: CORS_HEADERS })
+
+    return NextResponse.json({ success: true }, { headers: CORS_HEADERS })
+
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Неизвестная ошибка'
+    return NextResponse.json({ error: message }, { status: 500, headers: CORS_HEADERS })
+  }
+}
+
+================
+File: app/lib/supabase.ts
+================
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseKey = process.env.SUPABASE_SECRET_KEY!
+
+export const supabase = createClient(supabaseUrl, supabaseKey)
+
+================
+File: app/api/assistant/chat/route.ts
+================
+import { NextRequest, NextResponse } from 'next/server'
+
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
+const CORE_URL = 'https://epotos-core.vercel.app'
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  })
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { message, module = 'юринтел', history = [] } = await request.json()
+
+    if (!message?.trim()) {
+      return NextResponse.json({ error: 'Сообщение не может быть пустым' }, { status: 400 })
+    }
+
+    // 1. Ищем релевантные чанки
+    const searchRes = await fetch(`${CORE_URL}/api/assistant/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: message, module, limit: 5 }),
+    })
+    const searchData = await searchRes.json()
+    const chunks = searchData.chunks ?? []
+
+    // 2. Формируем контекст из найденных чанков
+    const context = chunks.length > 0
+      ? chunks.map((c: { chunk_text: string; knowledge_title: string; similarity: number }, i: number) =>
+          `[${i + 1}] ${c.knowledge_title}\n${c.chunk_text}`
+        ).join('\n\n---\n\n')
+      : ''
+
+    // 3. Формируем системный промпт
+    const systemPrompt = context
+      ? `Ты — ЭПОТОС Ассистент, помощник по работе с системой Эпотос-ЮрИнтел. Отвечай только на русском языке, кратко и по делу.
+
+Используй следующие материалы из базы знаний для ответа:
+
+${context}
+
+Если ответ не содержится в материалах — честно скажи об этом и предложи обратиться в поддержку.`
+      : `Ты — ЭПОТОС Ассистент, помощник по работе с системой Эпотос-ЮрИнтел. Отвечай только на русском языке. По данному вопросу у меня нет информации в базе знаний. Предложи пользователю обратиться в раздел Помощь → Поддержка.`
+
+    // 4. Формируем историю сообщений
+    const messages = [
+      ...history.slice(-6), // последние 3 пары вопрос-ответ
+      { role: 'user', content: message },
+    ]
+
+    // 5. Отправляем в Gemini через OpenRouter
+    const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.0-flash-001',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages,
+        ],
+        max_tokens: 1000,
+        temperature: 0.3,
+      }),
+    })
+
+    const aiData = await aiRes.json()
+    const answer = aiData.choices?.[0]?.message?.content ?? 'Не удалось получить ответ'
+
+    return NextResponse.json({
+      answer,
+      sources: chunks.map((c: { knowledge_title: string; knowledge_source_file: string; similarity: number }) => ({
+        title: c.knowledge_title,
+        file: c.knowledge_source_file,
+        similarity: Math.round(c.similarity * 100),
+      })),
+    }, {
+      headers: { 'Access-Control-Allow-Origin': '*' }
+    })
+
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Неизвестная ошибка'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
+
+================
+File: app/api/assistant/search/route.ts
+================
+import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/app/lib/supabase'
+
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
+
+async function generateEmbedding(text: string): Promise<number[]> {
+  const res = await fetch('https://openrouter.ai/api/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'google/gemini-embedding-001',
+      input: text,
+    }),
+  })
+  const data = await res.json()
+  return data.data[0].embedding
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { query, module = 'юринтел', limit = 5 } = await request.json()
+
+    if (!query?.trim()) {
+      return NextResponse.json({ error: 'Запрос не может быть пустым' }, { status: 400 })
+    }
+
+    // Генерируем эмбеддинг запроса
+    const queryEmbedding = await generateEmbedding(query)
+
+    // Ищем похожие чанки через pgvector
+    const { data: chunks, error } = await supabase.rpc('search_help_chunks', {
+      query_embedding: queryEmbedding,
+      match_module: module,
+      match_count: limit,
+    })
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
+
+    return NextResponse.json({ chunks: chunks ?? [] }, {
+      headers: { 'Access-Control-Allow-Origin': '*' }
+    })
+
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Неизвестная ошибка'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
+
+================
+File: app/api/assistant/upload/route.ts
+================
+import { NextRequest, NextResponse } from 'next/server'
+import { supabase } from '@/app/lib/supabase'
+
+export const maxDuration = 60
+export const runtime = 'nodejs'
+
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
+const ADMIN_IDS = [30, 1148]
+
+// Разбиваем текст на чанки по ~500 токенов (~2000 символов)
+function splitIntoChunks(text: string, chunkSize = 2000, overlap = 200): string[] {
+  const chunks: string[] = []
+  let start = 0
+  while (start < text.length) {
+    const end = Math.min(start + chunkSize, text.length)
+    chunks.push(text.slice(start, end).trim())
+    start += chunkSize - overlap
+  }
+  return chunks.filter(c => c.length > 50)
+}
+
+// Генерируем эмбеддинг через OpenRouter
+async function generateEmbedding(text: string): Promise<number[]> {
+  const res = await fetch('https://openrouter.ai/api/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'google/gemini-embedding-001',
+      input: text,
+    }),
+  })
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(`OpenRouter embeddings error ${res.status}: ${errText}`)
+  }
+  const data = await res.json()
+  if (!data.data?.[0]?.embedding) {
+    throw new Error(`Unexpected embeddings response: ${JSON.stringify(data)}`)
+  }
+  return data.data[0].embedding
+}
+
+// Извлекаем текст из DOCX через JSZip-подход
+async function extractTextFromDocx(buffer: ArrayBuffer): Promise<string> {
+  const { default: JSZip } = await import('jszip')
+  const zip = await JSZip.loadAsync(buffer)
+  const xmlFile = zip.file('word/document.xml')
+  if (!xmlFile) return ''
+  const xml = await xmlFile.async('text')
+  return xml
+    .replace(/<w:p[ >]/g, '\n<w:p>')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const formData = await request.formData()
+    const file = formData.get('file') as File | null
+    const title = formData.get('title') as string
+    const module = formData.get('module') as string ?? 'юринтел'
+    const userId = parseInt(formData.get('user_id') as string)
+    const userName = formData.get('user_name') as string
+
+    if (!ADMIN_IDS.includes(userId)) {
+      return NextResponse.json({ error: 'Нет прав' }, { status: 403 })
+    }
+    if (!file || !title) {
+      return NextResponse.json({ error: 'Файл и название обязательны' }, { status: 400 })
+    }
+
+    const buffer = await file.arrayBuffer()
+    let text = ''
+    const fileName = file.name.toLowerCase()
+
+    if (fileName.endsWith('.docx')) {
+      text = await extractTextFromDocx(buffer)
+    } else if (fileName.endsWith('.txt')) {
+      text = new TextDecoder().decode(buffer)
+    } else {
+      return NextResponse.json({ error: 'Поддерживаются только DOCX и TXT файлы' }, { status: 400 })
+    }
+
+    if (!text.trim()) {
+      return NextResponse.json({ error: 'Не удалось извлечь текст из файла' }, { status: 400 })
+    }
+
+    // Сохраняем документ в help_knowledge
+    const { data: knowledge, error: knowledgeError } = await supabase
+      .from('help_knowledge')
+      .insert({
+        title,
+        source_file: file.name,
+        file_type: fileName.endsWith('.docx') ? 'docx' : 'txt',
+        module,
+        content_text: text.slice(0, 10000), // сохраняем первые 10к символов
+        uploaded_by_id: userId,
+        uploaded_by_name: userName,
+      })
+      .select()
+      .single()
+
+    if (knowledgeError) {
+      return NextResponse.json({ error: knowledgeError.message }, { status: 400 })
+    }
+
+    // Разбиваем на чанки
+    const chunks = splitIntoChunks(text)
+
+    // Сначала сохраняем чанки без эмбеддингов
+    for (let i = 0; i < chunks.length; i++) {
+      await supabase.from('help_chunks').insert({
+        knowledge_id: knowledge.id,
+        chunk_index: i,
+        chunk_text: chunks[i],
+        embedding: null,
+      })
+    }
+
+    // Сразу возвращаем успех
+    const response = NextResponse.json({
+      success: true,
+      knowledge_id: knowledge.id,
+      chunks_created: chunks.length,
+      status: 'indexing',
+    })
+
+    // Генерируем эмбеддинги в фоне (не блокируем ответ)
+    ;(async () => {
+      const { data: savedChunks } = await supabase
+        .from('help_chunks')
+        .select('id, chunk_text')
+        .eq('knowledge_id', knowledge.id)
+        .order('chunk_index')
+
+      for (const chunk of savedChunks ?? []) {
+        try {
+          const embedding = await generateEmbedding(chunk.chunk_text)
+          await supabase
+            .from('help_chunks')
+            .update({ embedding })
+            .eq('id', chunk.id)
+        } catch (e) {
+          console.error(`Ошибка эмбеддинга для чанка ${chunk.id}:`, e)
+        }
+      }
+    })()
+
+    return response
+
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Неизвестная ошибка'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
+
+
+
+
+
+================================================================
+End of Codebase
+================================================================

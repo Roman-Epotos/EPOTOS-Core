@@ -1,6 +1,6 @@
 {
   "output": {
-    "filePath": "repomix-components.txt",
+    "filePath": "repomix-components-core.txt",
     "style": "plain"
   },
   "include": [
