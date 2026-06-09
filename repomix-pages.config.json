@@ -1,0 +1,11 @@
+{
+  "output": {
+    "filePath": "repomix-pages.txt",
+    "style": "plain"
+  },
+  "include": [
+    "app/**/page.tsx",
+    "app/**/layout.tsx",
+    "app/hooks/**/*.ts"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "output": {
+    "filePath": "repomix-api.txt",
+    "style": "plain"
+  },
+  "include": [
+    "app/api/**/*.ts",
+    "app/lib/**/*.ts"
+  ]
+}
