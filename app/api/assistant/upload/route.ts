@@ -108,30 +108,49 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: knowledgeError.message }, { status: 400 })
     }
 
-    // Разбиваем на чанки и генерируем эмбеддинги
+    // Разбиваем на чанки
     const chunks = splitIntoChunks(text)
-    const errors: string[] = []
 
+    // Сначала сохраняем чанки без эмбеддингов
     for (let i = 0; i < chunks.length; i++) {
-      try {
-        const embedding = await generateEmbedding(chunks[i])
-        await supabase.from('help_chunks').insert({
-          knowledge_id: knowledge.id,
-          chunk_index: i,
-          chunk_text: chunks[i],
-          embedding,
-        })
-      } catch (e) {
-        errors.push(`Чанк ${i}: ${e}`)
-      }
+      await supabase.from('help_chunks').insert({
+        knowledge_id: knowledge.id,
+        chunk_index: i,
+        chunk_text: chunks[i],
+        embedding: null,
+      })
     }
 
-    return NextResponse.json({
+    // Сразу возвращаем успех
+    const response = NextResponse.json({
       success: true,
       knowledge_id: knowledge.id,
-      chunks_created: chunks.length - errors.length,
-      errors: errors.length > 0 ? errors : undefined,
+      chunks_created: chunks.length,
+      status: 'indexing',
     })
+
+    // Генерируем эмбеддинги в фоне (не блокируем ответ)
+    ;(async () => {
+      const { data: savedChunks } = await supabase
+        .from('help_chunks')
+        .select('id, chunk_text')
+        .eq('knowledge_id', knowledge.id)
+        .order('chunk_index')
+
+      for (const chunk of savedChunks ?? []) {
+        try {
+          const embedding = await generateEmbedding(chunk.chunk_text)
+          await supabase
+            .from('help_chunks')
+            .update({ embedding })
+            .eq('id', chunk.id)
+        } catch (e) {
+          console.error(`Ошибка эмбеддинга для чанка ${chunk.id}:`, e)
+        }
+      }
+    })()
+
+    return response
 
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Неизвестная ошибка'
