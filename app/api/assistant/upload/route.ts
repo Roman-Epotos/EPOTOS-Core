@@ -32,7 +32,14 @@ async function generateEmbedding(text: string): Promise<number[]> {
       input: text,
     }),
   })
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(`OpenRouter embeddings error ${res.status}: ${errText}`)
+  }
   const data = await res.json()
+  if (!data.data?.[0]?.embedding) {
+    throw new Error(`Unexpected embeddings response: ${JSON.stringify(data)}`)
+  }
   return data.data[0].embedding
 }
 
