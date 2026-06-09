@@ -41,7 +41,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 400 })
     }
 
-    return NextResponse.json({ chunks: chunks ?? [] })
+    return NextResponse.json({ chunks: chunks ?? [] }, {
+      headers: { 'Access-Control-Allow-Origin': '*' }
+    })
 
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Неизвестная ошибка'

@@ -3,6 +3,16 @@ import { NextRequest, NextResponse } from 'next/server'
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
 const CORE_URL = 'https://epotos-core.vercel.app'
 
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  })
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { message, module = 'юринтел', history = [] } = await request.json()
@@ -72,6 +82,8 @@ ${context}
         file: c.knowledge_source_file,
         similarity: Math.round(c.similarity * 100),
       })),
+    }, {
+      headers: { 'Access-Control-Allow-Origin': '*' }
     })
 
   } catch (err) {
