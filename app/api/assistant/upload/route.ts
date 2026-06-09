@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/app/lib/supabase'
 
+export const maxDuration = 60
+export const runtime = 'nodejs'
+
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
 const ADMIN_IDS = [30, 1148]
 
