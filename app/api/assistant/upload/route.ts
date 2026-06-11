@@ -112,32 +112,50 @@ export async function POST(request: NextRequest) {
     const chunks = splitIntoChunks(text)
 
     // Генерируем эмбеддинги синхронно и сохраняем чанки сразу с эмбеддингами
+    let chunksCreated = 0
+    const chunkErrors: string[] = []
+
     for (let i = 0; i < chunks.length; i++) {
       try {
         const embedding = await generateEmbedding(chunks[i])
-        await supabase.from('help_chunks').insert({
+        console.log(`Чанк ${i}: эмбеддинг получен, размер=${embedding.length}`)
+        const { error: insertError } = await supabase.from('help_chunks').insert({
           knowledge_id: knowledge.id,
           chunk_index: i,
           chunk_text: chunks[i],
           embedding,
         })
+        if (insertError) {
+          console.error(`Чанк ${i}: ошибка INSERT:`, insertError.message)
+          chunkErrors.push(`Чанк ${i}: ${insertError.message}`)
+        } else {
+          chunksCreated++
+          console.log(`Чанк ${i}: сохранён успешно`)
+        }
       } catch (e) {
-        // Сохраняем чанк без эмбеддинга если ошибка
-        await supabase.from('help_chunks').insert({
+        const msg = e instanceof Error ? e.message : String(e)
+        console.error(`Чанк ${i}: исключение:`, msg)
+        chunkErrors.push(`Чанк ${i}: ${msg}`)
+        // Сохраняем без эмбеддинга
+        const { error: fallbackError } = await supabase.from('help_chunks').insert({
           knowledge_id: knowledge.id,
           chunk_index: i,
           chunk_text: chunks[i],
           embedding: null,
         })
-        console.error(`Ошибка эмбеддинга для чанка ${i}:`, e)
+        if (fallbackError) {
+          console.error(`Чанк ${i}: fallback INSERT тоже упал:`, fallbackError.message)
+        }
       }
     }
 
     return NextResponse.json({
       success: true,
       knowledge_id: knowledge.id,
-      chunks_created: chunks.length,
-      status: 'ready',
+      chunks_created: chunksCreated,
+      chunks_total: chunks.length,
+      errors: chunkErrors,
+      status: chunksCreated > 0 ? 'ready' : 'failed',
     })
 
   } catch (err) {
