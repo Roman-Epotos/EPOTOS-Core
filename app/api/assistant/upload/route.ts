@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/app/lib/supabase'
 
-export const maxDuration = 60
+export const maxDuration = 120
 export const runtime = 'nodejs'
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
@@ -111,46 +111,34 @@ export async function POST(request: NextRequest) {
     // Разбиваем на чанки
     const chunks = splitIntoChunks(text)
 
-    // Сначала сохраняем чанки без эмбеддингов
+    // Генерируем эмбеддинги синхронно и сохраняем чанки сразу с эмбеддингами
     for (let i = 0; i < chunks.length; i++) {
-      await supabase.from('help_chunks').insert({
-        knowledge_id: knowledge.id,
-        chunk_index: i,
-        chunk_text: chunks[i],
-        embedding: null,
-      })
+      try {
+        const embedding = await generateEmbedding(chunks[i])
+        await supabase.from('help_chunks').insert({
+          knowledge_id: knowledge.id,
+          chunk_index: i,
+          chunk_text: chunks[i],
+          embedding,
+        })
+      } catch (e) {
+        // Сохраняем чанк без эмбеддинга если ошибка
+        await supabase.from('help_chunks').insert({
+          knowledge_id: knowledge.id,
+          chunk_index: i,
+          chunk_text: chunks[i],
+          embedding: null,
+        })
+        console.error(`Ошибка эмбеддинга для чанка ${i}:`, e)
+      }
     }
 
-    // Сразу возвращаем успех
-    const response = NextResponse.json({
+    return NextResponse.json({
       success: true,
       knowledge_id: knowledge.id,
       chunks_created: chunks.length,
-      status: 'indexing',
+      status: 'ready',
     })
-
-    // Генерируем эмбеддинги в фоне (не блокируем ответ)
-    ;(async () => {
-      const { data: savedChunks } = await supabase
-        .from('help_chunks')
-        .select('id, chunk_text')
-        .eq('knowledge_id', knowledge.id)
-        .order('chunk_index')
-
-      for (const chunk of savedChunks ?? []) {
-        try {
-          const embedding = await generateEmbedding(chunk.chunk_text)
-          await supabase
-            .from('help_chunks')
-            .update({ embedding })
-            .eq('id', chunk.id)
-        } catch (e) {
-          console.error(`Ошибка эмбеддинга для чанка ${chunk.id}:`, e)
-        }
-      }
-    })()
-
-    return response
 
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Неизвестная ошибка'
